@@ -82,6 +82,23 @@ module IndexedStorage {
 			return new DeferWhen<IDBDatabase>();
 		}
 
+		export function whenRequestReady():Defer<any> {
+			return new DeferWhen<any>();
+		}
+
+		export function whenRequestComplete():Defer<any> {
+			return new DeferWhen<any>();
+		}
+
+		export function whenTransactionComplete():Defer<any> {
+			return new DeferWhen<any>();
+		}
+
+
+		export function all<T>( promisesOrValues:any[] ):Promise<T> {
+			return new PromiseWhen<T>( when.all<T>( promisesOrValues ) );
+		}
+
 
 		/*static factory():when.Deferred<any[]> {
 		 return when.defer<any[]>();
