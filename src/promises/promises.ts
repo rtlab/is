@@ -15,8 +15,8 @@ module IndexedStorage {
 
 			 then<U>( onFulfilled:( value:T ) => Promise<U>, onRejected?:( reason:any ) => Promise<U>, onProgress?:( update:any ) => void ): Promise<U>;
 			 then<U>( onFulfilled:( value:T ) => Promise<U>, onRejected?:( reason:any ) => U, onProgress?:( update:any ) => void ): Promise<U>;
-			 then<U>( onFulfilled:( value:T ) => U, onRejected?:( reason:any ) => Promise<U>, onProgress?:( update:any ) => void ): Promise<U>;
-			 then<U>( onFulfilled:( value:T ) => U, onRejected?:( reason:any ) => U, onProgress?:( update:any ) => void ): Promise<U>;*/
+			 then<U>( onFulfilled:( value:T ) => U, onRejected?:( reason:any ) => Promise<U>, onProgress?:( update:any ) => void ): Promise<U>;*/
+			then( onFulfilled:( value:T ) => any, onRejected?:( reason:any ) => any, onProgress?:( update:any ) => void ): Promise<T>;
 		}
 
 		export interface Defer<T> {
@@ -29,6 +29,7 @@ module IndexedStorage {
 		export class DeferWhen<T> implements Defer<T> {
 
 			private defer:when.Deferred<T> = null;
+			private promise:PromiseWhen<T> = null;
 
 			constructor() {
 				this.defer = when.defer<T>();
@@ -39,7 +40,10 @@ module IndexedStorage {
 			}
 
 			getPromise():Promise<T> {
-				return this.defer.promise;
+				if ( this.promise === null ) {
+					this.promise = new PromiseWhen( this.defer.promise );
+				}
+				return this.promise;
 			}
 
 			reject( reason:any ):void {
@@ -57,6 +61,11 @@ module IndexedStorage {
 
 			}
 
+			then( onFulfilled:( value:T ) => any, onRejected?:( reason:any ) => any, onProgress?:( update:any ) => void ):Promise<T> {
+				this.promise.then( onFulfilled, onRejected, onProgress );
+				return this;
+			}
+
 			/*catch<U>( onRejected?:( reason:any ) => Promise<U> ): Promise<U>
 			 catch<U>( onRejected?:( reason:any ) => U ): Promise<U>;
 
@@ -67,6 +76,10 @@ module IndexedStorage {
 			 then<U>( onFulfilled:( value:T ) => Promise<U>, onRejected?:( reason:any ) => U, onProgress?:( update:any ) => void ): Promise<U>;
 			 then<U>( onFulfilled:( value:T ) => U, onRejected?:( reason:any ) => Promise<U>, onProgress?:( update:any ) => void ): Promise<U>;
 			 then<U>( onFulfilled:( value:T ) => U, onRejected?:( reason:any ) => U, onProgress?:( update:any ) => void ): Promise<U>;*/
+		}
+
+		export function whenDatabaseReady():Defer<IDBDatabase> {
+			return new DeferWhen<IDBDatabase>();
 		}
 
 

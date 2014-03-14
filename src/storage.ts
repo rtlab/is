@@ -27,10 +27,10 @@ module IndexedStorage {
 
 		private isOpened:boolean = false;
 		private tables:HashTable<Table.Structure> = {};
-		private whenReady:when.Deferred<IDBDatabase> = null;
+		private whenReady:Promises.Defer<IDBDatabase> = null;
 
 		constructor( private name:string ) {
-			this.whenReady = when.defer<IDBDatabase>();
+			this.whenReady = Promises.whenDatabaseReady();
 		}
 
 		public getName():string {
@@ -57,8 +57,6 @@ module IndexedStorage {
 
 		private openDatabase():void {
 
-			console.log( 'open db' );
-
 			var syncObj:Sync.Processor = Sync.Processor.factory( this.name );
 
 			_.each( this.tables, function ( table:Table.Structure ):void {
@@ -74,8 +72,6 @@ module IndexedStorage {
 				syncObj.update( request, e.oldVersion, e.newVersion );
 			};
 			request.onsuccess = function ( e:Event ) {
-				console.log( e );
-
 				that.whenReady.resolve( (<IDBOpenDBRequest>e.target).result );
 			};
 			this.isOpened = true;
