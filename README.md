@@ -1,2 +1,6 @@
-is
+Indexed Storage
 ==
+
+#IndexedDB
+
+*`IndexedDB.opedDB();`*
