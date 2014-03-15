@@ -144,7 +144,10 @@ module IndexedStorage {
 
 			public add( table:string, record:Record ) {
 
+				console.log( 'tx.add' );
 				this.request( table, record, function ( store:IDBObjectStore, record:Record, defer:Promises.Defer<any> ):void {
+
+					console.log( record );
 
 					var request:IDBRequest = store.add( record.get(), record.key() );
 					request.onsuccess = function ( event:Event ):void {

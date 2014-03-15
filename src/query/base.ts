@@ -20,7 +20,7 @@ module IndexedStorage {
 			public objects:Record[] = [];
 			public request:Transaction = null;
 
-			public whenReady:Promises.Defer<any> = null;
+			public whenReady:Promises.Defer<Transaction> = null;
 			public whenComplete:Promises.Defer<any> = null;
 
 			public stateEndOfQueries:boolean = false;
@@ -30,7 +30,7 @@ module IndexedStorage {
 
 			private listOfCallbacks:CallbackTypes = { each: [] };
 
-			constructor( public table:Table.Structure, public whenDBReady:Promises.Promise<IDBDatabase> ) {
+			constructor( public table:Table.Structure, whenDBReady:Promises.Promise<IDBDatabase> ) {
 
 				var that:Base = this;
 				this.whenReady = Promises.whenRequestReady();

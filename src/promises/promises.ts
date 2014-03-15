@@ -1,5 +1,5 @@
 /// <reference path="../../vendor/when.d.ts" />
-// <reference path="./query/transaction.ts" />
+/// <reference path="../query/transaction.ts" />
 
 module IndexedStorage {
 
@@ -82,8 +82,8 @@ module IndexedStorage {
 			return new DeferWhen<IDBDatabase>();
 		}
 
-		export function whenRequestReady():Defer<any> {
-			return new DeferWhen<any>();
+		export function whenRequestReady():Defer<Query.Transaction> {
+			return new DeferWhen<Query.Transaction>();
 		}
 
 		export function whenRequestComplete():Defer<any> {

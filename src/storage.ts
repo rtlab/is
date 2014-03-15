@@ -4,7 +4,7 @@
 /// <reference path="./table.ts" />
 /// <reference path="./promises/promises.ts" />
 /// <reference path="./query/select.ts" />
-// <reference path="./query/insert.ts" />
+/// <reference path="./query/insert.ts" />
 
 module IndexedStorage {
 
@@ -47,12 +47,13 @@ module IndexedStorage {
 			return Query.Select.factory( this.tables[ name ], this.whenReady.getPromise() );
 		}
 
-		/*
-		 public insert( name:string ):Query.Insert {
-		 this.isOpened || this.openDatabase();
-		 return Query.Insert.factory( this.tables[name], this.whenReady.promise );
-		 }
 
+		public insert( name:string ):Query.Insert {
+			this.isOpened || this.openDatabase();
+			return Query.Insert.factory( this.tables[name], this.whenReady.getPromise() );
+		}
+
+		/*
 		 public remove( name:string ):Query.Selectable {
 		 return null;
 		 }*/
