@@ -47,16 +47,14 @@ module IndexedStorage {
 			return Query.Select.factory( this.tables[ name ], this.whenReady.getPromise() );
 		}
 
-
 		public insert( name:string ):Query.Insert {
 			this.isOpened || this.openDatabase();
 			return Query.Insert.factory( this.tables[name], this.whenReady.getPromise() );
 		}
 
-		/*
-		 public remove( name:string ):Query.Selectable {
-		 return null;
-		 }*/
+		public remove( name:string ):Query.Selectable {
+			return null;
+		}
 
 		private openDatabase():void {
 
