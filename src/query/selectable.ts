@@ -226,7 +226,6 @@ module IndexedStorage {
 
 					// primary key (  key(value) or keys( [value1, value2])
 					if ( this.keyValue !== null ) {
-
 						keyStats.type = KeyType.primary;
 						keyStats.values = this.keyValue;
 						if ( structure.key ) {
@@ -312,7 +311,6 @@ module IndexedStorage {
 						break;
 					}
 				} while ( false );
-
 				return keyStats;
 			}
 

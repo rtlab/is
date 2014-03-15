@@ -38,7 +38,6 @@ module IndexedStorage {
 
 				whenDBReady.then( function ( database:IDBDatabase ) {
 					var request:Transaction = Transaction.factory( database, [table.getName()] ).complete(function ( records:Record[] ):void {
-						console.log( 'trend', that );
 						that.setTransactionResults( records );
 						that.whenComplete.resolve();
 					} ).fail( function ():void {

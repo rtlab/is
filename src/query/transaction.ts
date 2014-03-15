@@ -117,7 +117,7 @@ module IndexedStorage {
 				do {
 					try {
 
-						var request:IDBRequest = this.open( table ).index( index ).openCursor( range );
+						var request:IDBRequest = index ? this.open( table ).index( index ).openCursor( range ) : this.open( table ).openCursor();
 						request.onsuccess = function ( e:Event ):void {
 
 							var cursor:IDBCursorWithValue = <IDBCursorWithValue>(<IDBRequest>e.target).result;
@@ -187,10 +187,9 @@ module IndexedStorage {
 				} );
 			}
 
-			public get( table:string, record:Record ):void {
+			public get( table:string, key:any ):void {
 
-				this.request( table, record, function ( store:IDBObjectStore, record:Record, defer:Promises.Defer<any> ):void {
-
+				this.request( table, Record.select( key ), function ( store:IDBObjectStore, record:Record, defer:Promises.Defer<any> ):void {
 					var request:IDBRequest = store.get( record.key() );
 					request.onsuccess = function ( event:Event ):void {
 						console.log( 'SELECTED', (<IDBRequest>event.target).result );

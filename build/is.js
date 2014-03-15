@@ -647,7 +647,7 @@ var IndexedStorage;
 				var defer = IndexedStorage.Promises.whenTransactionComplete();
 				do {
 					try {
-						var request = this.open( table ).index( index ).openCursor( range );
+						var request = index ? this.open( table ).index( index ).openCursor( range ) : this.open( table ).openCursor();
 						request.onsuccess = function ( e ) {
 							var cursor = e.target.result;
 							if ( cursor ) {
@@ -710,8 +710,8 @@ var IndexedStorage;
 				} );
 			};
 
-			Transaction.prototype.get = function ( table, record ) {
-				this.request( table, record, function ( store, record, defer ) {
+			Transaction.prototype.get = function ( table, key ) {
+				this.request( table, IndexedStorage.Query.Record.select( key ), function ( store, record, defer ) {
 					var request = store.get( record.key() );
 					request.onsuccess = function ( event ) {
 						console.log( 'SELECTED', event.target.result );
@@ -823,7 +823,6 @@ var IndexedStorage;
 
 				whenDBReady.then( function ( database ) {
 					var request = IndexedStorage.Query.Transaction.factory( database, [table.getName()] ).complete(function ( records ) {
-						console.log( 'trend', that );
 						that.setTransactionResults( records );
 						that.whenComplete.resolve();
 					} ).fail( function () {
@@ -1158,7 +1157,6 @@ var IndexedStorage;
 						break;
 					}
 				} while ( false );
-
 				return keyStats;
 			};
 
@@ -1396,6 +1394,7 @@ var IndexedStorage;
 		};
 
 		Storage.prototype.select = function ( name ) {
+			console.log( 'select' );
 			this.isOpened || this.openDatabase();
 			return IndexedStorage.Query.Select.factory( this.tables[name], this.whenReady.getPromise() );
 		};
@@ -1410,6 +1409,8 @@ var IndexedStorage;
 		 return null;
 		 }*/
 		Storage.prototype.openDatabase = function () {
+			console.log( 'sync' );
+
 			var syncObj = IndexedStorage.Sync.Processor.factory( this.name );
 
 			_.each( this.tables, function ( table ) {

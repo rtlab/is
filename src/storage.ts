@@ -42,6 +42,7 @@ module IndexedStorage {
 		}
 
 		public select( name:string ):Query.Select {
+			console.log( 'select' );
 			this.isOpened || this.openDatabase();
 			return Query.Select.factory( this.tables[ name ], this.whenReady.getPromise() );
 		}
@@ -57,6 +58,8 @@ module IndexedStorage {
 		 }*/
 
 		private openDatabase():void {
+
+			console.log( 'sync' );
 
 			var syncObj:Sync.Processor = Sync.Processor.factory( this.name );
 
