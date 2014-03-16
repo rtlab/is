@@ -20,8 +20,8 @@ module IndexedStorage {
 			public objects:Record[] = [];
 			public request:Transaction = null;
 
-			public whenReady:Promises.Defer<Transaction> = null;
-			public whenComplete:Promises.Defer<any> = null;
+			public whenReady:Promises.Defer<IDBDatabase> = null;
+			public whenComplete:Promises.Defer<Transaction> = null;
 
 			public stateEndOfQueries:boolean = false;
 
@@ -37,13 +37,13 @@ module IndexedStorage {
 				this.whenComplete = Promises.whenRequestComplete();
 
 				whenDBReady.then( function ( database:IDBDatabase ) {
-					var request:Transaction = Transaction.factory( database, [table.getName()] ).complete(function ( records:Record[] ):void {
-						that.setTransactionResults( records );
-						that.whenComplete.resolve();
-					} ).fail( function ():void {
+					/*var request:Transaction = Transaction.factory( database, [table.getName()] ).complete(function ( records:Record[] ):void {
+					 that.setTransactionResults( records );
+					 that.whenComplete.resolve( request );
+					 } ).fail( function ():void {
 
-					} );
-					that.whenReady.resolve( request );
+					 } );*/
+					that.whenReady.resolve( database );
 				} );
 			}
 

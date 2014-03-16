@@ -12,8 +12,16 @@ module IndexedStorage {
 			( store:IDBObjectStore, record:Record, defer:Promises.Defer<any> ):void ;
 		}
 
+		export interface InstanceCallback {
+			( store:IDBObjectStore, record:Record ):IDBRequest;
+		}
+
 		export interface OnComplete {
 			( records:Record[] ):void;
+		}
+
+		export interface OnSuccess {
+			( request:IDBRequest ):void;
 		}
 
 		export interface OnFail {
@@ -32,6 +40,7 @@ module IndexedStorage {
 			private records:Record[] = [];
 
 			private callbacksComplete:OnComplete[] = [];
+			private callbacksSuccess:OnSuccess[] = [];
 			private callbacksFail:OnFail[] = [];
 
 			constructor( private database:IDBDatabase, private tables:string[], private readwrite:boolean ) {
@@ -93,6 +102,38 @@ module IndexedStorage {
 				do {
 					try {
 						callback( this.open( table ), record, defer );
+						this.operations.push( defer.getPromise() );
+						repeatCounter = 0;
+					} catch ( e ) {
+						if ( !this.recover( e ) ) {
+							record.error( e );
+						} else if ( repeatCounter > 1 ) {
+							continue;
+						}
+					}
+					this.records.push( record );
+
+				} while ( --repeatCounter > 0 );
+			}
+
+			public query( table:string, record:Record, callback:InstanceCallback ):void {
+
+				var that:Transaction = this;
+				var repeatCounter:number = 3;
+				var defer:Promises.Defer<any> = Promises.whenTransactionComplete();
+				do {
+					try {
+						var request:IDBRequest = callback( this.open( table ), record );
+						request.onsuccess = function ( e:Event ):void {
+							_.each( that.callbacksSuccess, function ( callback:OnSuccess ):void {
+								callback.apply( (<IDBRequest>event.target), record );
+							} );
+						};
+						request.onerror = function ( e:Event ):void {
+
+						};
+
+						//callback( this.open( table ), record, defer );
 						this.operations.push( defer.getPromise() );
 						repeatCounter = 0;
 					} catch ( e ) {
@@ -238,6 +279,11 @@ module IndexedStorage {
 						callback( that.records );
 					} );
 				} );
+			}
+
+			public success( callback:OnSuccess ):Transaction {
+				this.callbacksSuccess.push( callback );
+				return this;
 			}
 
 			public complete( callback:OnComplete ):Transaction {

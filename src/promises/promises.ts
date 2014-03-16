@@ -82,12 +82,12 @@ module IndexedStorage {
 			return new DeferWhen<IDBDatabase>();
 		}
 
-		export function whenRequestReady():Defer<Query.Transaction> {
-			return new DeferWhen<Query.Transaction>();
+		export function whenRequestReady():Defer<IDBDatabase> {
+			return new DeferWhen<IDBDatabase>();
 		}
 
-		export function whenRequestComplete():Defer<any> {
-			return new DeferWhen<any>();
+		export function whenRequestComplete():Defer<Query.Transaction> {
+			return new DeferWhen<Query.Transaction>();
 		}
 
 		export function whenTransactionComplete():Defer<any> {

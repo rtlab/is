@@ -148,8 +148,362 @@ var IndexedStorage;
 	})( IndexedStorage.MetaData || (IndexedStorage.MetaData = {}) );
 	var MetaData = IndexedStorage.MetaData;
 })( IndexedStorage || (IndexedStorage = {}) );
+var IndexedStorage;
+(function ( IndexedStorage ) {
+	(function ( Query ) {
+		var Record = (function () {
+			function Record ( operation, id, value ) {
+				this.operation = operation;
+				this.id = id;
+				this.value = value;
+				this._success = false;
+				this._error = null;
+			}
+
+			Record.insert = function ( value, id ) {
+				return new Record( 'insert', id, value );
+			};
+
+			Record.remove = function ( id ) {
+				return new Record( 'remove', id, null );
+			};
+
+			Record.select = function ( id ) {
+				return new Record( 'select', id, null );
+			};
+
+			Record.load = function ( id, value ) {
+				return new Record( 'select', id, value );
+			};
+
+			Record.update = function ( value, id ) {
+				return new Record( 'update', id, value );
+			};
+
+			Record.prototype.selected = function ( value, id ) {
+				if ( typeof id === "undefined" ) {
+					id = null;
+				}
+				this.id = id;
+				this._success = true;
+				this.value = value;
+				this._error = null;
+				return this;
+			};
+
+			Record.prototype.inserted = function ( id ) {
+				if ( id !== null ) {
+					this.id = id;
+				}
+				this._success = true;
+				this._error = null;
+				return this;
+			};
+
+			Record.prototype.completed = function () {
+				this._error = null;
+				this._success = true;
+				return this;
+			};
+
+			Record.prototype.failed = function () {
+				this._error = null;
+				this._success = false;
+				return this;
+			};
+
+			Record.prototype.error = function ( e ) {
+				this._success = false;
+				this._error = e;
+				return this;
+			};
+
+			Record.prototype.key = function () {
+				return this.id;
+			};
+
+			Record.prototype.get = function () {
+				return this.value;
+			};
+
+			Record.prototype.getOperation = function () {
+				return this.operation;
+			};
+			return Record;
+		})();
+		Query.Record = Record;
+	})( IndexedStorage.Query || (IndexedStorage.Query = {}) );
+	var Query = IndexedStorage.Query;
+})( IndexedStorage || (IndexedStorage = {}) );
+/// <reference path="../../vendor/underscore.d.ts" />
+/// <reference path="../promises/promises.ts" />
+/// <reference path="../common.ts" />
+/// <reference path="../common.ts" />
+/// <reference path="./record.ts" />
+var IndexedStorage;
+(function ( IndexedStorage ) {
+	(function ( Query ) {
+		var Transaction = (function () {
+			function Transaction ( database, tables, readwrite ) {
+				this.database = database;
+				this.tables = tables;
+				this.readwrite = readwrite;
+				this.current = null;
+				this.opened = {};
+				this.operations = [];
+				this.records = [];
+				this.callbacksComplete = [];
+				this.callbacksSuccess = [];
+				this.callbacksFail = [];
+			}
+
+			Transaction.factory = function ( database, tables, readwrite ) {
+				if ( typeof readwrite === "undefined" ) {
+					readwrite = true;
+				}
+				return new Transaction( database, tables, readwrite );
+			};
+
+			Transaction.prototype.createTransaction = function () {
+				var transaction = this.database.transaction( this.tables, this.readwrite ? 'readwrite' : 'read' );
+				transaction.oncomplete = function ( event ) {
+				};
+				transaction.onabort = function ( event ) {
+				};
+				transaction.onerror = function ( event ) {
+				};
+				return transaction;
+			};
+
+			Transaction.prototype.open = function ( table ) {
+				try {
+					this.current || (this.current = this.createTransaction());
+					if ( !this.opened[table] ) {
+						this.opened[table] = this.current.objectStore( table );
+					}
+					return this.opened[table];
+				} catch ( e ) {
+					return null;
+				}
+			};
+
+			Transaction.prototype.recover = function ( e ) {
+				var isRecoverable = false;
+				switch ( e.name ) {
+					case 'TransactionInactiveError':
+						isRecoverable = true;
+						break;
+
+					case 'ReadOnlyError':
+						if ( !this.readwrite ) {
+							isRecoverable = true;
+							this.readwrite = true;
+						}
+						break;
+				}
+				if ( isRecoverable ) {
+					this.current = null;
+					this.opened = {};
+				}
+				return isRecoverable;
+			};
+
+			Transaction.prototype.request = function ( table, record, callback ) {
+				var repeatCounter = 3;
+				var defer = IndexedStorage.Promises.whenTransactionComplete();
+				do {
+					try {
+						callback( this.open( table ), record, defer );
+						this.operations.push( defer.getPromise() );
+						repeatCounter = 0;
+					} catch ( e ) {
+						if ( !this.recover( e ) ) {
+							record.error( e );
+						} else if ( repeatCounter > 1 ) {
+							continue;
+						}
+					}
+					this.records.push( record );
+				} while ( --repeatCounter > 0 );
+			};
+
+			Transaction.prototype.query = function ( table, record, callback ) {
+				var that = this;
+				var repeatCounter = 3;
+				var defer = IndexedStorage.Promises.whenTransactionComplete();
+				do {
+					try {
+						var request = callback( this.open( table ), record );
+						request.onsuccess = function ( e ) {
+							_.each( that.callbacksSuccess, function ( callback ) {
+								callback.apply( event.target, record );
+							} );
+						};
+						request.onerror = function ( e ) {
+						};
+
+						//callback( this.open( table ), record, defer );
+						this.operations.push( defer.getPromise() );
+						repeatCounter = 0;
+					} catch ( e ) {
+						if ( !this.recover( e ) ) {
+							record.error( e );
+						} else if ( repeatCounter > 1 ) {
+							continue;
+						}
+					}
+					this.records.push( record );
+				} while ( --repeatCounter > 0 );
+			};
+
+			Transaction.prototype.select = function ( table, index, range ) {
+				if ( typeof index === "undefined" ) {
+					index = null;
+				}
+				if ( typeof range === "undefined" ) {
+					range = null;
+				}
+				console.log( 'tr::select', table, index, range );
+
+				var repeatCounter = 3;
+				var that = this;
+				var defer = IndexedStorage.Promises.whenTransactionComplete();
+				do {
+					try {
+						var request = index ? this.open( table ).index( index ).openCursor( range ) : this.open( table ).openCursor();
+						request.onsuccess = function ( e ) {
+							var cursor = e.target.result;
+							if ( cursor ) {
+								that.records.push( IndexedStorage.Query.Record.load( cursor.primaryKey, cursor.value ) );
+								cursor.continue();
+							} else {
+								defer.resolve();
+							}
+						};
+						request.onerror = function ( e ) {
+							defer.resolve();
+						};
+						this.operations.push( defer.getPromise() );
+					} catch ( e ) {
+						if ( this.recover( e ) ) {
+							--repeatCounter;
+							continue;
+						}
+					}
+					repeatCounter = 0;
+				} while ( repeatCounter > 0 );
+			};
+
+			Transaction.prototype.add = function ( table, record ) {
+				console.log( 'tx.add' );
+				this.request( table, record, function ( store, record, defer ) {
+					console.log( record );
+
+					var request = store.add( record.get(), record.key() );
+					request.onsuccess = function ( event ) {
+						console.log( 'success' );
+						record.inserted( event.target.result );
+						defer.resolve();
+					};
+					request.onerror = function () {
+						console.log( 'fail' );
+						defer.resolve( [record.failed()] );
+					};
+				} );
+			};
+
+			Transaction.prototype.put = function ( table, record ) {
+				this.request( table, record, function ( store, record, defer ) {
+					var request = store.put( record.get(), record.key() );
+					request.onsuccess = function ( event ) {
+						defer.resolve( record.inserted( event.target.result ) );
+					};
+					request.onerror = function () {
+						defer.resolve( record.failed() );
+					};
+				} );
+			};
+
+			Transaction.prototype.remove = function ( table, record ) {
+				this.request( table, record, function ( store, record, defer ) {
+					var request = store.delete( record.key() );
+					request.onsuccess = function ( event ) {
+						defer.resolve( record.completed() );
+					};
+					request.onerror = function () {
+						defer.resolve( record.failed() );
+					};
+				} );
+			};
+
+			Transaction.prototype.get = function ( table, key ) {
+				this.request( table, IndexedStorage.Query.Record.select( key ), function ( store, record, defer ) {
+					var request = store.get( record.key() );
+					request.onsuccess = function ( event ) {
+						console.log( 'SELECTED', event.target.result );
+						defer.resolve( record.selected( event.target.result ) );
+					};
+					request.onerror = function () {
+						defer.resolve( record.failed() );
+					};
+				} );
+			};
+
+			Transaction.prototype.range = function ( table, index, valueFrom, valueTo, openFrom, openTo ) {
+				if ( valueFrom !== null ) {
+					var range = (valueTo !== null ? IDBKeyRange.bound( valueFrom, valueTo, !!openFrom, !!openTo ) : IDBKeyRange.upperBound( valueFrom, !!openFrom ));
+				} else {
+					var range = (valueTo !== null ? IDBKeyRange.lowerBound( valueTo, !!openTo ) : null);
+				}
+				this.select( table, index, range );
+			};
+
+			Transaction.prototype.equal = function ( table, index, value ) {
+				this.select( table, index, IDBKeyRange.only( value ) );
+			};
+
+			Transaction.prototype.all = function ( table ) {
+				this.select( table );
+			};
+
+			Transaction.prototype.clear = function ( table ) {
+			};
+
+			Transaction.prototype.count = function ( table ) {
+			};
+
+			Transaction.prototype.end = function () {
+				var that = this;
+				IndexedStorage.Promises.all( this.operations ).then( function () {
+					_.each( that.callbacksComplete, function ( callback ) {
+						console.log( callback, that.records );
+						callback( that.records );
+					} );
+				} );
+			};
+
+			Transaction.prototype.success = function ( callback ) {
+				this.callbacksSuccess.push( callback );
+				return this;
+			};
+
+			Transaction.prototype.complete = function ( callback ) {
+				this.callbacksComplete.push( callback );
+				return this;
+			};
+
+			Transaction.prototype.fail = function ( callback ) {
+				this.callbacksFail.push( callback );
+				return this;
+			};
+			return Transaction;
+		})();
+		Query.Transaction = Transaction;
+	})( IndexedStorage.Query || (IndexedStorage.Query = {}) );
+	var Query = IndexedStorage.Query;
+})( IndexedStorage || (IndexedStorage = {}) );
 /// <reference path="../../vendor/when.d.ts" />
-// <reference path="./query/transaction.ts" />
+/// <reference path="../query/transaction.ts" />
 var IndexedStorage;
 (function ( IndexedStorage ) {
 	(function ( Promises ) {
@@ -458,322 +812,6 @@ var IndexedStorage;
 var IndexedStorage;
 (function ( IndexedStorage ) {
 	(function ( Query ) {
-		var Record = (function () {
-			function Record ( operation, id, value ) {
-				this.operation = operation;
-				this.id = id;
-				this.value = value;
-				this._success = false;
-				this._error = null;
-			}
-
-			Record.insert = function ( value, id ) {
-				return new Record( 'insert', id, value );
-			};
-
-			Record.remove = function ( id ) {
-				return new Record( 'remove', id, null );
-			};
-
-			Record.select = function ( id ) {
-				return new Record( 'select', id, null );
-			};
-
-			Record.load = function ( id, value ) {
-				return new Record( 'select', id, value );
-			};
-
-			Record.update = function ( value, id ) {
-				return new Record( 'update', id, value );
-			};
-
-			Record.prototype.selected = function ( value, id ) {
-				if ( typeof id === "undefined" ) {
-					id = null;
-				}
-				this.id = id;
-				this._success = true;
-				this.value = value;
-				this._error = null;
-				return this;
-			};
-
-			Record.prototype.inserted = function ( id ) {
-				if ( id !== null ) {
-					this.id = id;
-				}
-				this._success = true;
-				this._error = null;
-				return this;
-			};
-
-			Record.prototype.completed = function () {
-				this._error = null;
-				this._success = true;
-				return this;
-			};
-
-			Record.prototype.failed = function () {
-				this._error = null;
-				this._success = false;
-				return this;
-			};
-
-			Record.prototype.error = function ( e ) {
-				this._success = false;
-				this._error = e;
-				return this;
-			};
-
-			Record.prototype.key = function () {
-				return this.id;
-			};
-
-			Record.prototype.get = function () {
-				return this.value;
-			};
-
-			Record.prototype.getOperation = function () {
-				return this.operation;
-			};
-			return Record;
-		})();
-		Query.Record = Record;
-	})( IndexedStorage.Query || (IndexedStorage.Query = {}) );
-	var Query = IndexedStorage.Query;
-})( IndexedStorage || (IndexedStorage = {}) );
-/// <reference path="../../vendor/underscore.d.ts" />
-/// <reference path="../promises/promises.ts" />
-/// <reference path="../common.ts" />
-/// <reference path="../common.ts" />
-/// <reference path="./record.ts" />
-var IndexedStorage;
-(function ( IndexedStorage ) {
-	(function ( Query ) {
-		var Transaction = (function () {
-			function Transaction ( database, tables, readwrite ) {
-				this.database = database;
-				this.tables = tables;
-				this.readwrite = readwrite;
-				this.current = null;
-				this.opened = {};
-				this.operations = [];
-				this.records = [];
-				this.callbacksComplete = [];
-				this.callbacksFail = [];
-			}
-
-			Transaction.factory = function ( database, tables, readwrite ) {
-				if ( typeof readwrite === "undefined" ) {
-					readwrite = true;
-				}
-				return new Transaction( database, tables, readwrite );
-			};
-
-			Transaction.prototype.createTransaction = function () {
-				var transaction = this.database.transaction( this.tables, this.readwrite ? 'readwrite' : 'read' );
-				transaction.oncomplete = function ( event ) {
-				};
-				transaction.onabort = function ( event ) {
-				};
-				transaction.onerror = function ( event ) {
-				};
-				return transaction;
-			};
-
-			Transaction.prototype.open = function ( table ) {
-				try {
-					this.current || (this.current = this.createTransaction());
-					if ( !this.opened[table] ) {
-						this.opened[table] = this.current.objectStore( table );
-					}
-					return this.opened[table];
-				} catch ( e ) {
-					return null;
-				}
-			};
-
-			Transaction.prototype.recover = function ( e ) {
-				var isRecoverable = false;
-				switch ( e.name ) {
-					case 'TransactionInactiveError':
-						isRecoverable = true;
-						break;
-
-					case 'ReadOnlyError':
-						if ( !this.readwrite ) {
-							isRecoverable = true;
-							this.readwrite = true;
-						}
-						break;
-				}
-				if ( isRecoverable ) {
-					this.current = null;
-					this.opened = {};
-				}
-				return isRecoverable;
-			};
-
-			Transaction.prototype.request = function ( table, record, callback ) {
-				var repeatCounter = 3;
-				var defer = IndexedStorage.Promises.whenTransactionComplete();
-				do {
-					try {
-						callback( this.open( table ), record, defer );
-						this.operations.push( defer.getPromise() );
-						repeatCounter = 0;
-					} catch ( e ) {
-						if ( !this.recover( e ) ) {
-							record.error( e );
-						} else if ( repeatCounter > 1 ) {
-							continue;
-						}
-					}
-					this.records.push( record );
-				} while ( --repeatCounter > 0 );
-			};
-
-			Transaction.prototype.select = function ( table, index, range ) {
-				if ( typeof index === "undefined" ) {
-					index = null;
-				}
-				if ( typeof range === "undefined" ) {
-					range = null;
-				}
-				console.log( 'tr::select', table, index, range );
-
-				var repeatCounter = 3;
-				var that = this;
-				var defer = IndexedStorage.Promises.whenTransactionComplete();
-				do {
-					try {
-						var request = index ? this.open( table ).index( index ).openCursor( range ) : this.open( table ).openCursor();
-						request.onsuccess = function ( e ) {
-							var cursor = e.target.result;
-							if ( cursor ) {
-								that.records.push( IndexedStorage.Query.Record.load( cursor.primaryKey, cursor.value ) );
-								cursor.continue();
-							} else {
-								defer.resolve();
-							}
-						};
-						request.onerror = function ( e ) {
-							defer.resolve();
-						};
-						this.operations.push( defer.getPromise() );
-					} catch ( e ) {
-						if ( this.recover( e ) ) {
-							--repeatCounter;
-							continue;
-						}
-					}
-					repeatCounter = 0;
-				} while ( repeatCounter > 0 );
-			};
-
-			Transaction.prototype.add = function ( table, record ) {
-				this.request( table, record, function ( store, record, defer ) {
-					var request = store.add( record.get(), record.key() );
-					request.onsuccess = function ( event ) {
-						console.log( 'success' );
-						record.inserted( event.target.result );
-						defer.resolve();
-					};
-					request.onerror = function () {
-						console.log( 'fail' );
-						defer.resolve( [record.failed()] );
-					};
-				} );
-			};
-
-			Transaction.prototype.put = function ( table, record ) {
-				this.request( table, record, function ( store, record, defer ) {
-					var request = store.put( record.get(), record.key() );
-					request.onsuccess = function ( event ) {
-						defer.resolve( record.inserted( event.target.result ) );
-					};
-					request.onerror = function () {
-						defer.resolve( record.failed() );
-					};
-				} );
-			};
-
-			Transaction.prototype.remove = function ( table, record ) {
-				this.request( table, record, function ( store, record, defer ) {
-					var request = store.delete( record.key() );
-					request.onsuccess = function ( event ) {
-						defer.resolve( record.completed() );
-					};
-					request.onerror = function () {
-						defer.resolve( record.failed() );
-					};
-				} );
-			};
-
-			Transaction.prototype.get = function ( table, key ) {
-				this.request( table, IndexedStorage.Query.Record.select( key ), function ( store, record, defer ) {
-					var request = store.get( record.key() );
-					request.onsuccess = function ( event ) {
-						console.log( 'SELECTED', event.target.result );
-						defer.resolve( record.selected( event.target.result ) );
-					};
-					request.onerror = function () {
-						defer.resolve( record.failed() );
-					};
-				} );
-			};
-
-			Transaction.prototype.range = function ( table, index, valueFrom, valueTo, openFrom, openTo ) {
-				if ( valueFrom !== null ) {
-					var range = (valueTo !== null ? IDBKeyRange.bound( valueFrom, valueTo, !!openFrom, !!openTo ) : IDBKeyRange.upperBound( valueFrom, !!openFrom ));
-				} else {
-					var range = (valueTo !== null ? IDBKeyRange.lowerBound( valueTo, !!openTo ) : null);
-				}
-				this.select( table, index, range );
-			};
-
-			Transaction.prototype.equal = function ( table, index, value ) {
-				this.select( table, index, IDBKeyRange.only( value ) );
-			};
-
-			Transaction.prototype.all = function ( table ) {
-				this.select( table );
-			};
-
-			Transaction.prototype.clear = function ( table ) {
-			};
-
-			Transaction.prototype.count = function ( table ) {
-			};
-
-			Transaction.prototype.end = function () {
-				var that = this;
-				IndexedStorage.Promises.all( this.operations ).then( function () {
-					_.each( that.callbacksComplete, function ( callback ) {
-						console.log( callback, that.records );
-						callback( that.records );
-					} );
-				} );
-			};
-
-			Transaction.prototype.complete = function ( callback ) {
-				this.callbacksComplete.push( callback );
-				return this;
-			};
-
-			Transaction.prototype.fail = function ( callback ) {
-				this.callbacksFail.push( callback );
-				return this;
-			};
-			return Transaction;
-		})();
-		Query.Transaction = Transaction;
-	})( IndexedStorage.Query || (IndexedStorage.Query = {}) );
-	var Query = IndexedStorage.Query;
-})( IndexedStorage || (IndexedStorage = {}) );
-var IndexedStorage;
-(function ( IndexedStorage ) {
-	(function ( Query ) {
 		var Exception = (function () {
 			function Exception ( name, message ) {
 				if ( typeof message === "undefined" ) {
@@ -808,7 +846,6 @@ var IndexedStorage;
 		var Base = (function () {
 			function Base ( table, whenDBReady ) {
 				this.table = table;
-				this.whenDBReady = whenDBReady;
 				this.objects = [];
 				this.request = null;
 				this.whenReady = null;
@@ -822,12 +859,13 @@ var IndexedStorage;
 				this.whenComplete = IndexedStorage.Promises.whenRequestComplete();
 
 				whenDBReady.then( function ( database ) {
-					var request = IndexedStorage.Query.Transaction.factory( database, [table.getName()] ).complete(function ( records ) {
-						that.setTransactionResults( records );
-						that.whenComplete.resolve();
-					} ).fail( function () {
-					} );
-					that.whenReady.resolve( request );
+					/*var request:Transaction = Transaction.factory( database, [table.getName()] ).complete(function ( records:Record[] ):void {
+					 that.setTransactionResults( records );
+					 that.whenComplete.resolve( request );
+					 } ).fail( function ():void {
+
+					 } );*/
+					that.whenReady.resolve( database );
 				} );
 			}
 
@@ -880,14 +918,14 @@ var __extends = this.__extends || function ( d, b ) {
 var IndexedStorage;
 (function ( IndexedStorage ) {
 	(function ( Query ) {
-		var KeyType;
 		(function ( KeyType ) {
 			KeyType[KeyType["primary"] = 0] = "primary";
 			KeyType[KeyType["unique"] = 1] = "unique";
 			KeyType[KeyType["index"] = 2] = "index";
 			KeyType[KeyType["range"] = 3] = "range";
 			KeyType[KeyType["none"] = 4] = "none";
-		})( KeyType || (KeyType = {}) );
+		})( Query.KeyType || (Query.KeyType = {}) );
+		var KeyType = Query.KeyType;
 
 		var Selectable = (function ( _super ) {
 			__extends( Selectable, _super );
@@ -896,6 +934,7 @@ var IndexedStorage;
 				this.keyValue = null;
 				this.fields = {};
 				this.customFilters = [];
+				this.isReadOnlyMode = true;
 			}
 
 			/**
@@ -1074,7 +1113,7 @@ var IndexedStorage;
 			};
 
 			Selectable.prototype.getBestKeyToUse = function ( structure, filterRanges ) {
-				var keyStats = { type : 4 /* none */, fields : null, values : null };
+				var keyStats = { type : 4 /* none */, name : null, fields : null, values : null };
 				do {
 					// primary key (  key(value) or keys( [value1, value2])
 					if ( this.keyValue !== null ) {
@@ -1108,6 +1147,7 @@ var IndexedStorage;
 					}, this );
 					if ( uxKey && _.isArray( uxKey ) ) {
 						keyStats.type = 1 /* unique */;
+						keyStats.name = IndexedStorage.Query.keyName( uxKey, true );
 						keyStats.fields = uxKey;
 						break;
 					}
@@ -1141,7 +1181,7 @@ var IndexedStorage;
 							} );
 
 							if ( hasEqual === 0 || (canUseMoreThen && canUseLessThen) ) {
-								keysCanUse.push( { type : indexType ? (hasEqual === 0 ? 2 /* index */ : 3 /* range */) : 1 /* unique */, fields : fields, values : null } );
+								keysCanUse.push( { type : indexType ? (hasEqual === 0 ? 2 /* index */ : 3 /* range */) : 1 /* unique */, name : IndexedStorage.Query.keyName( fields, !indexType ), fields : fields, values : null } );
 							}
 						} );
 					} );
@@ -1214,7 +1254,7 @@ var IndexedStorage;
 				} );
 			};
 
-			Selectable.prototype.startRequest = function ( request ) {
+			Selectable.prototype.startRequest = function ( database ) {
 				var tableName = this.table.getName();
 				var structure = this.table.getStructure();
 				console.log( 'fields', JSON.stringify( this.fields ) );
@@ -1229,41 +1269,55 @@ var IndexedStorage;
 					//this.removeFiltersAlreadyUseInKey( keyToUse, filterRanges );
 				}
 
+				var storeObject = database.transaction( tableName, this.isReadOnlyMode ? 'readonly' : 'readwrite' ).objectStore( tableName );
+
 				switch ( keyToUse.type ) {
 					case 0 /* primary */
 					:
-						_.each( keyToUse.values, function ( value ) {
-							request.get( tableName, value );
-						} );
-						request.end();
+						this.selectByPrimaryKey( storeObject, keyToUse );
 						break;
 
 					case 2 /* index */
 					:
 					case 1 /* unique */
 					:
-						var keyName = IndexedStorage.Query.keyName( keyToUse.fields, keyToUse.type === 1 /* unique */ );
+						var index = storeObject.index( keyToUse.name );
 						_.each( keyToUse.values, function ( value ) {
-							request.equal( tableName, keyName, value );
+							this.selectByCursor( index.openCursor( IDBKeyRange.only( value ) ) );
 						} );
-						request.end();
 						break;
 
 					case 3 /* range */
 					:
-						var keyName = IndexedStorage.Query.keyName( keyToUse.fields, keyToUse.type === 1 /* unique */ );
-						request.range( tableName, keyName, keyToUse.values[0], keyToUse.values[1], keyToUse.values[2], keyToUse.values[3] );
-						request.end();
+						this.selectByCursor( storeObject.index( keyToUse.name ).openCursor( IDBKeyRange.bound( keyToUse.values[0], keyToUse.values[1], keyToUse.values[2], keyToUse.values[3] ) ) );
 						break;
 
 					case 4 /* none */
 					:
-						request.all( tableName );
-						request.end();
+						this.selectByCursor( storeObject.openCursor() );
 						break;
 				}
 			};
 
+			/**
+			 * @abstract
+			 * @param storeObject
+			 * @param keyToUse
+			 */
+			Selectable.prototype.selectByPrimaryKey = function ( storeObject, keyToUse ) {
+			};
+
+			/**
+			 * @abstract
+			 * @param cursor
+			 */
+			Selectable.prototype.selectByCursor = function ( cursor ) {
+			};
+
+			/**
+			 * @deprecated
+			 * @param records
+			 */
 			Selectable.prototype.setTransactionResults = function ( records ) {
 				console.log( 'toadd', JSON.stringify( records ) );
 				var filters = this.customFilters;
@@ -1289,21 +1343,41 @@ var IndexedStorage;
 				console.log( 'toadd', JSON.stringify( this.objects ) );
 			};
 
-			Selectable.prototype.each = function ( callback ) {
-				console.log( 'each' );
+			Selectable.prototype.filterValue = function ( record ) {
+				var result = true;
 
-				this.addCallback( 'each', callback );
+				var filters = this.customFilters;
+				for ( var i = 0; i < filters.length; ++i ) {
+					if ( !filters[i]( record ) ) {
+						result = false;
+						break;
+					}
+				}
+				result = result && _.all( this.fields, function ( range, field ) {
+					try {
+						var value = record.get()[field];
+						return range.equal ? range.equal.indexOf( value ) >= 0 : IndexedStorage.Query.filter( value, range.from, range.to, range.openFrom, range.openTo );
+					} catch ( e ) {
+						return false;
+					}
+				} );
+				return result;
+			};
+
+			Selectable.prototype.execute = function () {
 				if ( !this.stateEndOfQueries ) {
-					console.log( 'first each' );
-
 					var that = this;
-					this.whenReady.getPromise().then( function ( request ) {
-						console.log( 'start' );
-						that.startRequest( request );
+					this.whenReady.getPromise().then( function ( database ) {
+						that.startRequest( database );
 					} );
 				}
 				this.stateEndOfQueries = true;
 				return this;
+			};
+
+			Selectable.prototype.each = function ( callback ) {
+				this.addCallback( 'each', callback );
+				return this.execute();
 			};
 			return Selectable;
 		})( IndexedStorage.Query.Base );
@@ -1334,6 +1408,54 @@ var IndexedStorage;
 				return new Select( table, whenDBReady );
 			};
 
+			/**
+			 * @param storeObject
+			 * @param keyToUse
+			 */
+			Select.prototype.selectByPrimaryKey = function ( storeObject, keyToUse ) {
+				var that = this;
+				_.each( keyToUse.values, function ( value ) {
+					var request = storeObject.get( value );
+					request.onsuccess = function ( e ) {
+						var record = IndexedStorage.Query.Record.load( value, e.target.result );
+						if ( that.filterValue( record ) ) {
+							that.objects.push( record );
+						}
+
+						//@todo set result status
+						that.whenComplete.resolve();
+					};
+					request.onerror = function ( e ) {
+						//@todo set result status
+						that.whenComplete.resolve();
+					};
+				} );
+			};
+
+			/**
+			 * @param cursor
+			 */
+			Select.prototype.selectByCursor = function ( cursor ) {
+				var that = this;
+				cursor.onsuccess = function ( e ) {
+					var cursor = e.target.result;
+					if ( cursor ) {
+						console.log( 'cursor', cursor, JSON.stringify( cursor ) );
+
+						var record = IndexedStorage.Query.Record.load( cursor.primaryKey, cursor.value );
+						if ( that.filterValue( record ) ) {
+							that.objects.push( record );
+						}
+						cursor.continue();
+					} else {
+						that.whenComplete.resolve();
+					}
+				};
+				cursor.onerror = function ( e ) {
+					that.whenComplete.resolve();
+				};
+			};
+
 			Select.prototype.each = function ( callback ) {
 				console.log( 'super' );
 
@@ -1356,13 +1478,78 @@ var IndexedStorage;
 	})( IndexedStorage.Query || (IndexedStorage.Query = {}) );
 	var Query = IndexedStorage.Query;
 })( IndexedStorage || (IndexedStorage = {}) );
+/// <reference path="../../vendor/underscore.d.ts" />
+/// <reference path="../promises/promises.ts" />
+/// <reference path="../common.ts" />
+/// <reference path="../table.ts" />
+/// <reference path="./record.ts" />
+/// <reference path="./transaction.ts" />
+/// <reference path="./callbacks.ts" />
+/// <reference path="./base.ts" />
+var IndexedStorage;
+(function ( IndexedStorage ) {
+	(function ( Query ) {
+		var Insert = (function ( _super ) {
+			__extends( Insert, _super );
+			function Insert () {
+				_super.apply( this, arguments );
+			}
+
+			Insert.factory = function ( table, whenDBReady ) {
+				return new Insert( table, whenDBReady );
+			};
+
+			Insert.prototype.set = function ( value, id ) {
+				if ( typeof id === "undefined" ) {
+					id = null;
+				}
+				return this.records( [IndexedStorage.Query.Record.insert( value, id )] );
+			};
+
+			Insert.prototype.records = function ( records ) {
+				/*var that:Insert = this;
+				 this.whenReady.getPromise().then( function ( request:Transaction ):void {
+				 _.each( records, function ( record:Record ):void {
+				 request.add( that.table.getName(), record );
+				 } );
+				 } );*/
+				return this;
+			};
+
+			Insert.prototype.values = function ( values ) {
+				var records = [];
+				_.each( values, function ( value ) {
+					records.push( IndexedStorage.Query.Record.insert( value ) );
+				} );
+				return this.records( records );
+			};
+
+			Insert.prototype.data = function ( values ) {
+				var records = [];
+				_.each( values, function ( value, key ) {
+					records.push( IndexedStorage.Query.Record.insert( value, key ) );
+				} );
+				return this.records( records );
+			};
+
+			Insert.prototype.each = function ( callback ) {
+				this.addCallback( 'each', callback );
+				this.stateEndOfQueries = true;
+				return this;
+			};
+			return Insert;
+		})( IndexedStorage.Query.Base );
+		Query.Insert = Insert;
+	})( IndexedStorage.Query || (IndexedStorage.Query = {}) );
+	var Query = IndexedStorage.Query;
+})( IndexedStorage || (IndexedStorage = {}) );
 /// <reference path="../vendor/underscore.d.ts" />
 /// <reference path="./common.ts" />
 /// <reference path="./sync/sync.ts" />
 /// <reference path="./table.ts" />
 /// <reference path="./promises/promises.ts" />
 /// <reference path="./query/select.ts" />
-// <reference path="./query/insert.ts" />
+/// <reference path="./query/insert.ts" />
 var IndexedStorage;
 (function ( IndexedStorage ) {
 	var Storage = (function () {
@@ -1399,15 +1586,15 @@ var IndexedStorage;
 			return IndexedStorage.Query.Select.factory( this.tables[name], this.whenReady.getPromise() );
 		};
 
-		/*
-		 public insert( name:string ):Query.Insert {
-		 this.isOpened || this.openDatabase();
-		 return Query.Insert.factory( this.tables[name], this.whenReady.promise );
-		 }
+		Storage.prototype.insert = function ( name ) {
+			this.isOpened || this.openDatabase();
+			return IndexedStorage.Query.Insert.factory( this.tables[name], this.whenReady.getPromise() );
+		};
 
-		 public remove( name:string ):Query.Selectable {
-		 return null;
-		 }*/
+		Storage.prototype.remove = function ( name ) {
+			return null;
+		};
+
 		Storage.prototype.openDatabase = function () {
 			console.log( 'sync' );
 

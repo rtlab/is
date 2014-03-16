@@ -12,7 +12,7 @@ module IndexedStorage {
 
 	export module Query {
 
-		enum KeyType {
+		export enum KeyType {
 			primary,
 			unique,
 			index,
@@ -20,8 +20,9 @@ module IndexedStorage {
 			none
 		}
 
-		interface KeyStats {
+		export interface KeyStats {
 			type: KeyType;
+			name:string;
 			fields:string[];
 			values:any;
 		}
@@ -39,6 +40,7 @@ module IndexedStorage {
 			public keyValue:any[] = null;
 			public fields:HashTable<FieldRange> = {};
 			public customFilters:Callbacks.CustomFilter[] = [];
+			public isReadOnlyMode:boolean = true;
 
 			/**
 			 * Get items by primary key value
@@ -221,7 +223,7 @@ module IndexedStorage {
 
 			private getBestKeyToUse( structure:Table.Info, filterRanges:HashTable<FieldRange> ):KeyStats {
 
-				var keyStats:KeyStats = {type: KeyType.none, fields: null, values: null };
+				var keyStats:KeyStats = {type: KeyType.none, name: null, fields: null, values: null };
 				do {
 
 					// primary key (  key(value) or keys( [value1, value2])
@@ -258,6 +260,7 @@ module IndexedStorage {
 					}, this );
 					if ( uxKey && _.isArray( uxKey ) ) {
 						keyStats.type = KeyType.unique;
+						keyStats.name = Query.keyName( uxKey, true );
 						keyStats.fields = uxKey;
 						break;
 					}
@@ -294,7 +297,7 @@ module IndexedStorage {
 							} );
 
 							if ( hasEqual === 0 || (canUseMoreThen && canUseLessThen ) ) {
-								keysCanUse.push( { type: indexType ? ( hasEqual === 0 ? KeyType.index : KeyType.range ) : KeyType.unique, fields: fields, values: null } )
+								keysCanUse.push( { type: indexType ? ( hasEqual === 0 ? KeyType.index : KeyType.range ) : KeyType.unique, name: Query.keyName( fields, !indexType ), fields: fields, values: null } )
 							}
 						} );
 					} );
@@ -369,7 +372,7 @@ module IndexedStorage {
 				} );
 			}
 
-			private startRequest( request:Transaction ):void {
+			private startRequest( database:IDBDatabase ):void {
 
 				var tableName:string = this.table.getName();
 				var structure:Table.Info = this.table.getStructure();
@@ -385,37 +388,74 @@ module IndexedStorage {
 					//this.removeFiltersAlreadyUseInKey( keyToUse, filterRanges );
 				}
 
+				var storeObject:IDBObjectStore = database.transaction( tableName, this.isReadOnlyMode ? 'readonly' : 'readwrite' ).objectStore( tableName );
+
 				switch ( keyToUse.type ) {
 
 					case KeyType.primary :
-						_.each( keyToUse.values, function ( value:any ):void {
-							request.get( tableName, value );
-						} );
-						request.end();
+						this.selectByPrimaryKey( storeObject, keyToUse );
 						break;
 
 					case KeyType.index:
 					case KeyType.unique:
-						var keyName:string = Query.keyName( keyToUse.fields, keyToUse.type === KeyType.unique );
+						var index:IDBIndex = storeObject.index( keyToUse.name );
 						_.each( keyToUse.values, function ( value:any ):void {
-							request.equal( tableName, keyName, value );
+							this.selectByCursor( index.openCursor( IDBKeyRange.only( value ) ) );
 						} );
-						request.end();
 						break;
 
 					case KeyType.range:
-						var keyName:string = Query.keyName( keyToUse.fields, keyToUse.type === KeyType.unique );
-						request.range( tableName, keyName, keyToUse.values[0], keyToUse.values[1], keyToUse.values[2], keyToUse.values[3] );
-						request.end();
+						this.selectByCursor(
+							storeObject.index( keyToUse.name ).openCursor( IDBKeyRange.bound( keyToUse.values[0], keyToUse.values[1], keyToUse.values[2], keyToUse.values[3] ) )
+						);
 						break;
 
 					case KeyType.none:
-						request.all( tableName );
-						request.end();
+						this.selectByCursor( storeObject.openCursor() );
 						break;
+
+					/*
+					 case KeyType.index:
+					 case KeyType.unique:
+					 var keyName:string = Query.keyName( keyToUse.fields, keyToUse.type === KeyType.unique );
+					 _.each( keyToUse.values, function ( value:any ):void {
+					 request.equal( tableName, keyName, value );
+					 } );
+					 request.end();
+					 break;
+
+					 case KeyType.range:
+					 var keyName:string = Query.keyName( keyToUse.fields, keyToUse.type === KeyType.unique );
+					 request.range( tableName, keyName, keyToUse.values[0], keyToUse.values[1], keyToUse.values[2], keyToUse.values[3] );
+					 request.end();
+					 break;
+
+					 case KeyType.none:
+					 request.all( tableName );
+					 request.end();
+					 break;*/
 				}
 			}
 
+			/**
+			 * @abstract
+			 * @param storeObject
+			 * @param keyToUse
+			 */
+			public selectByPrimaryKey( storeObject:IDBObjectStore, keyToUse:KeyStats ):void {
+			}
+
+			/**
+			 * @abstract
+			 * @param cursor
+			 */
+			public selectByCursor( cursor:IDBRequest ):void {
+			}
+
+			/**
+			 * @deprecated
+			 * @param records
+			 */
 			public setTransactionResults( records:Record[] ):void {
 				console.log( 'toadd', JSON.stringify( records ) );
 				var filters:Callbacks.CustomFilter[] = this.customFilters;
@@ -442,23 +482,42 @@ module IndexedStorage {
 				console.log( 'toadd', JSON.stringify( this.objects ) );
 			}
 
-			public each( callback:Callbacks.Each ):Selectable {
+			public filterValue( record:IndexedStorage.Query.Record ):boolean {
 
-				console.log( 'each' );
+				var result:boolean = true;
 
-				this.addCallback( 'each', callback );
+				var filters:Callbacks.CustomFilter[] = this.customFilters;
+				for ( var i:number = 0; i < filters.length; ++i ) {
+					if ( !filters[i]( record ) ) {
+						result = false;
+						break;
+					}
+				}
+				result = result && _.all( this.fields, function ( range:FieldRange, field?:string ):boolean {
+					try {
+						var value:any = record.get()[ field ];
+						return range.equal ? range.equal.indexOf( value ) >= 0 : Query.filter( value, range.from, range.to, range.openFrom, range.openTo );
+					} catch ( e ) {
+						return false;
+					}
+				} );
+				return result;
+			}
+
+			public execute():Selectable {
 				if ( !this.stateEndOfQueries ) {
-
-					console.log( 'first each' );
-
 					var that:Selectable = this;
-					this.whenReady.getPromise().then( function ( request:Transaction ):void {
-						console.log( 'start' );
-						that.startRequest( request );
+					this.whenReady.getPromise().then( function ( database:IDBDatabase ):void {
+						that.startRequest( database );
 					} );
 				}
 				this.stateEndOfQueries = true;
 				return this;
+			}
+
+			public each( callback:Callbacks.Each ):Selectable {
+				this.addCallback( 'each', callback );
+				return this.execute();
 			}
 		}
 	}
